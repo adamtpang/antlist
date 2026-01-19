@@ -262,8 +262,9 @@ export default function Home() {
   // Sort buckets: by tier first, then by sortMode
   const sortedBuckets = [...buckets].sort((a, b) => {
     // Tier priority: A > B > C > null
-    const tierOrder = { A: 0, B: 1, C: 2, null: 3 };
-    const tierDiff = (tierOrder[a.tier ?? null] ?? 3) - (tierOrder[b.tier ?? null] ?? 3);
+    const tierOrder: Record<string, number> = { A: 0, B: 1, C: 2 };
+    const getTierOrder = (tier: string | null | undefined) => tierOrder[tier ?? ""] ?? 3;
+    const tierDiff = getTierOrder(a.tier) - getTierOrder(b.tier);
     if (tierDiff !== 0) return tierDiff;
 
     if (sortMode === "count") return b.tasks.length - a.tasks.length;
