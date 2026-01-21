@@ -36,18 +36,16 @@ async function callReplicateWithRetry(
 ): Promise<string> {
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
-            let output = "";
-            for await (const event of replicate.stream("meta/meta-llama-3-70b-instruct", {
+            const output = await replicate.run("meta/meta-llama-3-70b-instruct", {
                 input: {
                     prompt,
                     temperature: 0.2,
                     top_p: 0.9,
                     max_tokens: 4000,
                 }
-            })) {
-                output += String(event);
-            }
-            return output;
+            });
+            // Replicate returns array of strings for this model
+            return Array.isArray(output) ? output.join('') : String(output);
         } catch (error) {
             const isTimeout = error instanceof Error &&
                 (error.message.includes('timeout') || error.message.includes('Timeout') ||

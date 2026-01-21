@@ -201,7 +201,10 @@ export default function Home() {
           }),
         });
 
-        if (!response.ok) throw new Error("Processing failed");
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(errorData.error || `Processing failed: ${response.status}`);
+        }
         const data: SortResponse = await response.json();
 
         for (const item of data.tasks) {
