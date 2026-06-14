@@ -43,7 +43,7 @@ export default function Deconstructor() {
                 setFolders(parsed);
                 const unsorted = parsed.filter((f: FolderData) => f.tier === null);
                 setViewMode(unsorted.length > 0 ? "tinder" : parsed.length > 0 ? "tree" : "upload");
-            } catch (e) { /* ignore parse errors */ }
+            } catch { /* ignore parse errors */ }
         }
     }, []);
 
@@ -251,7 +251,7 @@ export default function Deconstructor() {
     const downloadSortedZip = async () => {
         const zip = new JSZip();
         const date = new Date().toISOString().split("T")[0];
-        const rootFolder = zip.folder(`flowlist-${date}`);
+        const rootFolder = zip.folder(`8020-${date}`);
 
         // Create tier subfolders
         const tierFolders = {
@@ -284,7 +284,7 @@ export default function Deconstructor() {
         const blob = await zip.generateAsync({ type: "blob" });
         const a = document.createElement("a");
         a.href = URL.createObjectURL(blob);
-        a.download = `flowlist-${date}.zip`;
+        a.download = `8020-${date}.zip`;
         a.click();
     };
 
@@ -356,7 +356,7 @@ export default function Deconstructor() {
         <main className="min-h-screen p-4 md:p-8 max-w-3xl mx-auto">
             {/* Header */}
             <div className="text-center mb-8">
-                <h1 className="text-2xl md:text-3xl font-bold">AntList</h1>
+                <h1 className="text-2xl md:text-3xl font-bold">8020.best</h1>
                 <p className="text-[var(--muted-foreground)] text-sm mt-1 font-mono">Tiny steps for big goals</p>
         <Link href="/" className="text-sm text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors font-mono mt-2 inline-block">
           ← Back

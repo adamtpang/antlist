@@ -13,10 +13,19 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "AntList | Minimalist Task Organizer",
-  description: "Organize your chaotic thoughts with tiny, actionable steps.",
+  metadataBase: new URL("https://8020.best"),
+  title: "8020.best — Do the vital 20% first",
+  description:
+    "Dump your tasks, let AI sort them into priority tiers, and focus on the vital 20% that drives 80% of the results.",
   icons: {
     icon: "/icon.svg",
+  },
+  openGraph: {
+    title: "8020.best — Do the vital 20% first",
+    description: "Dump your tasks, sort them by priority, and do the vital few first.",
+    url: "https://8020.best",
+    siteName: "8020.best",
+    type: "website",
   },
 };
 

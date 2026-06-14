@@ -1,14 +1,17 @@
-# Antlist
+# 8020.best
 
-AI-powered task organizer that sorts uploaded tasks into priority tiers and deconstructs them into subtask trees.
+AI task prioritizer built on the Pareto principle — dump your tasks, let AI sort them into priority tiers, and focus on the vital 20% that drives 80% of the results.
+
+Live at **[8020.best](https://8020.best)**.
 
 ## Problem
-When you have a pile of unstructured tasks (from notes, files, or brain dumps), you need a fast way to triage them by importance and break big ones into actionable subtasks.
+When you have a pile of unstructured tasks (from notes, files, or brain dumps), you need a fast way to triage them by importance and act on what actually matters.
 
 ## What It Does
-- Drag-and-drop file upload to ingest tasks; uses AI (OpenAI + Replicate) to sort them into A/B/C priority tiers.
-- "Deconstructor" view that breaks tasks into recursive subtask trees with completion tracking.
-- Persists data locally via IndexedDB; supports ZIP export/import.
+- Drag-and-drop a file **or paste tasks directly**; uses AI (Anthropic Claude) to sort them into priority tiers (S → F).
+- Drag folders between tiers, then **view, copy, or export** a clean priority-ordered markdown list — so you do the important, urgent things first.
+- "Deconstructor" view breaks big tasks into recursive subtask trees with completion tracking.
+- Persists data locally via IndexedDB; supports markdown and ZIP export/import (re-importing preserves your tiers).
 
 ## Tech Stack
-Next.js 15, TypeScript, OpenAI API, Replicate, IndexedDB (idb-keyval), JSZip, Tailwind CSS.
+Next.js 15, TypeScript, Anthropic Claude API (`@anthropic-ai/sdk`), IndexedDB (idb-keyval), JSZip, Tailwind CSS.

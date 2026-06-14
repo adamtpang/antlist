@@ -10,6 +10,102 @@ function generateId(): string {
   return Math.random().toString(36).substring(2, 11);
 }
 
+// Serialize a task tree to an indented markdown checklist (preserves subtasks).
+function serializeTasks(tasks: Task[], depth = 0): string {
+  return tasks
+    .map((t) => {
+      const indent = "  ".repeat(depth);
+      const line = `${indent}- [${t.completed ? "x" : " "}] ${t.text}`;
+      const kids = t.children.length ? "\n" + serializeTasks(t.children, depth + 1) : "";
+      return line + kids;
+    })
+    .join("\n");
+}
+
+// Parse an 8020.best markdown export (## tier / ### folder / - [ ] task) back into folders,
+// preserving tiers. Returns null if the text isn't in that format, so raw todo lists fall
+// through to the AI sorter instead.
+function parseAntlistMarkdown(content: string): Folder[] | null {
+  const lines = content.split(/\r?\n/);
+  const hasTierHeader = lines.some((l) => /^##\s+[SABCDF?](?:\s|$)/.test(l));
+  const hasFolderHeader = lines.some((l) => /^###\s+\S/.test(l));
+  if (!hasTierHeader || !hasFolderHeader) return null;
+
+  const result: Folder[] = [];
+  let currentTier: Tier = null;
+  let currentFolder: Folder | null = null;
+  let stack: { task: Task; level: number }[] = [];
+
+  for (const raw of lines) {
+    const tierMatch = raw.match(/^##\s+([SABCDF?])(?:\s|$)/);
+    if (tierMatch) {
+      currentTier = tierMatch[1] === "?" ? null : (tierMatch[1] as Tier);
+      currentFolder = null;
+      stack = [];
+      continue;
+    }
+    const folderMatch = raw.match(/^###\s+(.+)/);
+    if (folderMatch) {
+      currentFolder = { id: generateId(), name: folderMatch[1].trim(), tier: currentTier, tasks: [], expanded: false };
+      result.push(currentFolder);
+      stack = [];
+      continue;
+    }
+    const taskMatch = raw.match(/^(\s*)-\s*\[([ xX])\]\s*(.+)/);
+    if (taskMatch && currentFolder) {
+      const level = Math.floor(taskMatch[1].length / 2);
+      const task: Task = { id: generateId(), text: taskMatch[3].trim(), completed: taskMatch[2].toLowerCase() === "x", children: [] };
+      if (level === 0) {
+        currentFolder.tasks.push(task);
+        stack = [{ task, level: 0 }];
+      } else {
+        while (stack.length && stack[stack.length - 1].level >= level) stack.pop();
+        const parent = stack[stack.length - 1];
+        if (parent) {
+          parent.task.children.push(task);
+          stack.push({ task, level });
+        } else {
+          currentFolder.tasks.push(task);
+          stack = [{ task, level: 0 }];
+        }
+      }
+    }
+  }
+
+  return result.length ? result : null;
+}
+
+// Trigger a browser download for a Blob.
+function triggerDownload(filename: string, blob: Blob): void {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// Read-only rendered task tree for the markdown preview modal.
+function renderPreviewTasks(tasks: Task[], depth = 0) {
+  return tasks.map((t) => (
+    <div key={t.id} style={{ paddingLeft: depth ? 16 : 0 }}>
+      <div className="flex items-start gap-2 py-0.5">
+        <span
+          className={`mt-1 w-3.5 h-3.5 shrink-0 rounded-[3px] border flex items-center justify-center text-[9px] leading-none ${
+            t.completed ? "bg-green-500 border-green-500 text-white" : "border-[var(--border)] text-transparent"
+          }`}
+        >
+          ✓
+        </span>
+        <span className={`text-sm ${t.completed ? "line-through text-[var(--muted-foreground)]" : ""}`}>{t.text}</span>
+      </div>
+      {t.children.length > 0 && renderPreviewTasks(t.children, depth + 1)}
+    </div>
+  ));
+}
+
 export default function Home() {
   const [folders, setFolders] = useState<Folder[]>([]);
   const [isDragActive, setIsDragActive] = useState(false);
@@ -17,6 +113,11 @@ export default function Home() {
   const [isLoaded, setIsLoaded] = useState(false);
   const [progress, setProgress] = useState({ current: 0, total: 0 });
   const [draggedFolderId, setDraggedFolderId] = useState<string | null>(null);
+  const [pasteText, setPasteText] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [showMarkdown, setShowMarkdown] = useState(false);
+  const [rawView, setRawView] = useState(false);
+  const [copied, setCopied] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Load from IndexedDB
@@ -33,6 +134,14 @@ export default function Home() {
       set("flowlist-folders", folders);
     }
   }, [folders, isLoaded]);
+
+  // Close the markdown modal on Escape
+  useEffect(() => {
+    if (!showMarkdown) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setShowMarkdown(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [showMarkdown]);
 
   // File handling
   const handleDrag = useCallback((e: React.DragEvent) => {
@@ -154,6 +263,19 @@ export default function Home() {
 
     if (!f.name.endsWith(".txt") && !f.name.endsWith(".md")) return;
     const content = await f.text();
+
+    // If this is an 8020.best markdown export, restore folders + tiers directly (no AI re-sort).
+    const restored = parseAntlistMarkdown(content);
+    if (restored) {
+      setError(null);
+      setFolders(prev => {
+        const existingMap = new Map(prev.map(f => [f.name, f]));
+        restored.forEach(f => existingMap.set(f.name, f));
+        return Array.from(existingMap.values());
+      });
+      return;
+    }
+
     await processContent(content);
   };
 
@@ -168,6 +290,7 @@ export default function Home() {
   const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
   const processContent = async (content: string) => {
+    setError(null);
     const allLines = content.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
     const newLines = allLines.filter(line => {
       const inExisting = folders.some(f =>
@@ -237,9 +360,18 @@ export default function Home() {
       setFolders(updatedFolders);
     } catch (err) {
       console.error(err);
+      setError(err instanceof Error ? err.message : "Sorting failed");
     } finally {
       setIsProcessing(false);
     }
+  };
+
+  // Paste raw text directly — no file needed
+  const handlePasteSubmit = async () => {
+    if (!pasteText.trim() || isProcessing) return;
+    const content = pasteText;
+    await processContent(content);
+    setPasteText("");
   };
 
   // Drag-drop for tier sorting
@@ -312,42 +444,73 @@ export default function Home() {
     localStorage.removeItem("flowlist-folders");
   };
 
-  // Download ZIP
+  // Download ZIP — everything nested under an "8020/" root, tiers as subfolders (re-importable).
   const downloadZip = async () => {
     const zip = new JSZip();
     const date = new Date().toISOString().split("T")[0];
+    const root = zip.folder("8020");
 
     TIERS.forEach(tier => {
       if (!tier) return;
-      const tierFolder = zip.folder(tier);
-      folders.filter(f => f.tier === tier).forEach(folder => {
-        const content = folder.tasks.map(t => `- [${t.completed ? "x" : " "}] ${t.text}`).join("\n");
-        tierFolder?.file(`${folder.name}.txt`, content);
+      const tierFolders = folders.filter(f => f.tier === tier);
+      if (tierFolders.length === 0) return;
+      const tierFolder = root?.folder(tier);
+      tierFolders.forEach(folder => {
+        tierFolder?.file(`${folder.name}.txt`, serializeTasks(folder.tasks));
       });
     });
 
-    // Unsorted
-    const unsortedFolder = zip.folder("_Unsorted");
-    folders.filter(f => f.tier === null).forEach(folder => {
-      const content = folder.tasks.map(t => `- [${t.completed ? "x" : " "}] ${t.text}`).join("\n");
-      unsortedFolder?.file(`${folder.name}.txt`, content);
+    const unsorted = folders.filter(f => f.tier === null);
+    if (unsorted.length > 0) {
+      const unsortedFolder = root?.folder("_Unsorted");
+      unsorted.forEach(folder => {
+        unsortedFolder?.file(`${folder.name}.txt`, serializeTasks(folder.tasks));
+      });
+    }
+
+    const blob = await zip.generateAsync({ type: "blob" });
+    triggerDownload(`8020-${date}.zip`, new Blob([blob], { type: "application/zip" }));
+  };
+
+  // Build the prioritized markdown (S → F, then unsorted). Single source for view / copy / download.
+  const buildMarkdown = () => {
+    const date = new Date().toISOString().split("T")[0];
+    const sections: string[] = [`# 8020.best — ${date}`, "", "_Priority order: top = do these first._", ""];
+
+    TIERS.forEach(tier => {
+      if (!tier) return;
+      const tierFolders = folders.filter(f => f.tier === tier);
+      if (tierFolders.length === 0) return;
+      sections.push(`## ${tier}`, "");
+      tierFolders.forEach(folder => {
+        sections.push(`### ${folder.name}`, serializeTasks(folder.tasks), "");
+      });
     });
 
-    // Generate blob with explicit MIME type
-    const blob = await zip.generateAsync({ type: "blob" });
-    const zipBlob = new Blob([blob], { type: "application/zip" });
-    const url = URL.createObjectURL(zipBlob);
+    const unsorted = folders.filter(f => f.tier === null);
+    if (unsorted.length > 0) {
+      sections.push(`## ? (Unsorted)`, "");
+      unsorted.forEach(folder => {
+        sections.push(`### ${folder.name}`, serializeTasks(folder.tasks), "");
+      });
+    }
 
-    // Create and trigger download link
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `flowlist-${date}.zip`;
-    document.body.appendChild(a); // Required for some browsers
-    a.click();
+    return sections.join("\n").replace(/\n{3,}/g, "\n\n").trim() + "\n";
+  };
 
-    // Cleanup
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+  const downloadMarkdown = () => {
+    const date = new Date().toISOString().split("T")[0];
+    triggerDownload(`8020-${date}.md`, new Blob([buildMarkdown()], { type: "text/markdown;charset=utf-8" }));
+  };
+
+  const copyMarkdown = async () => {
+    try {
+      await navigator.clipboard.writeText(buildMarkdown());
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setCopied(false);
+    }
   };
 
   const unsortedFolders = folders.filter(f => f.tier === null);
@@ -356,8 +519,8 @@ export default function Home() {
     <main className="min-h-screen p-4 md:p-8 max-w-4xl mx-auto">
       {/* Header */}
       <div className="text-center mb-12">
-        <h1 className="text-3xl font-bold tracking-tight mb-2">AntList</h1>
-        <p className="text-[var(--muted-foreground)] text-sm font-mono">Dump → Coalesce → Organize</p>
+        <h1 className="text-3xl font-bold tracking-tight mb-2">8020.best</h1>
+        <p className="text-[var(--muted-foreground)] text-sm font-mono">Do the vital 20% first</p>
       </div>
 
       {/* Drop Zone */}
@@ -376,10 +539,57 @@ export default function Home() {
           className="hidden"
           onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])}
         />
-        <div className="text-4xl mb-4">🐜</div>
+        <div className="text-4xl mb-4">🎯</div>
         <p className="text-sm font-medium">Drop your chaos here</p>
         <p className="text-xs text-[var(--muted-foreground)] mt-2">.txt, .md, or .zip</p>
       </div>
+
+      {/* Paste Box — dump tasks without making a file first */}
+      <div className="mb-6">
+        <div className="flex items-center gap-3 mb-3">
+          <div className="h-px flex-1 bg-[var(--card-border)]" />
+          <span className="text-xs text-[var(--muted-foreground)] font-mono">or paste your tasks</span>
+          <div className="h-px flex-1 bg-[var(--card-border)]" />
+        </div>
+        <textarea
+          value={pasteText}
+          onChange={(e) => setPasteText(e.target.value)}
+          onKeyDown={(e) => {
+            if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+              e.preventDefault();
+              handlePasteSubmit();
+            }
+          }}
+          placeholder={"One task per line, then Sort…\n\nCall the dentist\nFinish the Q3 report\nBuy groceries"}
+          rows={5}
+          disabled={isProcessing}
+          className="input-field resize-y leading-relaxed disabled:opacity-50"
+        />
+        <div className="flex items-center justify-between mt-2 gap-3">
+          <span className="text-xs text-[var(--muted-foreground)] font-mono">
+            {(() => {
+              const n = pasteText.split(/\r?\n/).filter((l) => l.trim()).length;
+              return n > 0 ? `${n} line${n === 1 ? "" : "s"} · ⌘/Ctrl+Enter to sort` : "AI sorts them into folders";
+            })()}
+          </span>
+          <button
+            onClick={handlePasteSubmit}
+            disabled={isProcessing || !pasteText.trim()}
+            className="btn-primary text-sm px-4 py-2"
+          >
+            {isProcessing ? "Sorting…" : "🎯 Sort tasks"}
+          </button>
+        </div>
+      </div>
+
+      {/* Error banner */}
+      {error && (
+        <div className="mb-4 flex items-start gap-2 rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <span aria-hidden>⚠️</span>
+          <span className="flex-1">{error}</span>
+          <button onClick={() => setError(null)} className="text-red-400 hover:text-red-600" aria-label="Dismiss error">✕</button>
+        </div>
+      )}
 
       {/* Progress */}
       {isProcessing && (
@@ -468,13 +678,91 @@ export default function Home() {
 
       {/* Actions */}
       {folders.length > 0 && (
-        <div className="flex gap-2 mt-6 justify-center">
-          <button onClick={downloadZip} className="btn-primary text-sm px-4 py-2">
-            📥 Export ZIP
+        <div className="flex flex-wrap gap-2 mt-6 justify-center">
+          <button onClick={() => { setRawView(false); setShowMarkdown(true); }} className="btn-primary text-sm px-4 py-2">
+            📋 View / copy list
+          </button>
+          <button onClick={downloadZip} className="btn-secondary text-sm px-4 py-2">
+            📦 Export ZIP
           </button>
           <button onClick={clearAll} className="btn-secondary text-sm px-4 py-2 text-red-400">
             🗑️ Clear All
           </button>
+        </div>
+      )}
+      {/* Markdown view / copy modal */}
+      {showMarkdown && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 animate-fade-in"
+          onClick={() => setShowMarkdown(false)}
+        >
+          <div
+            className="bg-[var(--card)] border border-[var(--border)] rounded-xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-center gap-2 p-4 border-b border-[var(--border)]">
+              <h2 className="font-semibold flex-1 flex items-center gap-2">
+                <span>📋</span> Prioritized list
+              </h2>
+              <button onClick={() => setRawView((v) => !v)} className="btn-secondary text-xs px-2.5 py-1">
+                {rawView ? "Preview" : "Markdown"}
+              </button>
+              <button
+                onClick={() => setShowMarkdown(false)}
+                className="text-[var(--muted-foreground)] hover:text-[var(--foreground)] text-xl leading-none px-1"
+                aria-label="Close"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="overflow-y-auto p-5 flex-1">
+              {rawView ? (
+                <pre className="text-xs font-mono whitespace-pre-wrap bg-[var(--muted)] rounded-lg p-4 leading-relaxed border border-[var(--border)]">
+                  {buildMarkdown()}
+                </pre>
+              ) : (
+                <div>
+                  {[...TIERS, null].map((tier) => {
+                    const tierFolders = folders.filter((f) => f.tier === tier);
+                    if (tierFolders.length === 0) return null;
+                    return (
+                      <div key={tier ?? "unsorted"} className="mb-6 last:mb-0">
+                        <div className="flex items-center gap-2 mb-3">
+                          <span
+                            className={`${tier ? TIER_COLORS[tier] : "bg-[var(--muted)] text-[var(--muted-foreground)]"} w-6 h-6 flex items-center justify-center rounded-md text-white font-bold text-xs shrink-0`}
+                          >
+                            {tier ?? "?"}
+                          </span>
+                          <div className="h-px flex-1 bg-[var(--border)]" />
+                        </div>
+                        <div className="space-y-4 pl-1">
+                          {tierFolders.map((folder) => (
+                            <div key={folder.id}>
+                              <div className="text-sm font-semibold mb-1.5">{folder.name}</div>
+                              <div className="pl-0.5">{renderPreviewTasks(folder.tasks)}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="flex gap-2 p-4 border-t border-[var(--border)]">
+              <button onClick={copyMarkdown} className="btn-primary text-sm px-4 py-2 flex-1">
+                {copied ? "✓ Copied to clipboard" : "📋 Copy markdown"}
+              </button>
+              <button onClick={downloadMarkdown} className="btn-secondary text-sm px-4 py-2" title="Download .md file">
+                ⬇ .md
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </main>

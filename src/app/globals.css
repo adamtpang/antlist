@@ -1,12 +1,15 @@
 @import "tailwindcss";
 
-/* AntList - Minimalist Zen Theme */
+/* 8020.best - Minimalist Zen Theme */
 
 :root {
   --background: #ffffff;
   --foreground: #000000;
   --card-bg: #ffffff;
   --card-border: #e0e0e0;
+  /* Components reference these directly as var(--card)/var(--border) */
+  --card: #ffffff;
+  --border: #e0e0e0;
   --primary: #000000;
   --primary-dim: #333333;
   --accent: #666666;
