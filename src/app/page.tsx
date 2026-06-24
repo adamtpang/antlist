@@ -366,7 +366,7 @@ export default function Home() {
     }
   };
 
-  // Paste raw text directly — no file needed
+  // Paste raw text directly (no file needed)
   const handlePasteSubmit = async () => {
     if (!pasteText.trim() || isProcessing) return;
     const content = pasteText;
@@ -444,7 +444,7 @@ export default function Home() {
     localStorage.removeItem("flowlist-folders");
   };
 
-  // Download ZIP — everything nested under an "8020/" root, tiers as subfolders (re-importable).
+  // Download ZIP: everything nested under an "8020/" root, tiers as subfolders (re-importable).
   const downloadZip = async () => {
     const zip = new JSZip();
     const date = new Date().toISOString().split("T")[0];
@@ -475,7 +475,7 @@ export default function Home() {
   // Build the prioritized markdown (S → F, then unsorted). Single source for view / copy / download.
   const buildMarkdown = () => {
     const date = new Date().toISOString().split("T")[0];
-    const sections: string[] = [`# 8020.best — ${date}`, "", "_Priority order: top = do these first._", ""];
+    const sections: string[] = [`# 8020.best · ${date}`, "", "_Priority order: top = do these first._", ""];
 
     TIERS.forEach(tier => {
       if (!tier) return;
@@ -523,34 +523,8 @@ export default function Home() {
         <p className="text-[var(--muted-foreground)] text-sm font-mono">Do the vital 20% first</p>
       </div>
 
-      {/* Drop Zone */}
-      <div
-        className={`drop-zone rounded-xl p-6 text-center cursor-pointer transition-all mb-6 ${isDragActive ? "active glow-primary" : ""}`}
-        onDragEnter={handleDrag}
-        onDragLeave={handleDrag}
-        onDragOver={handleDrag}
-        onDrop={handleFileDrop}
-        onClick={() => fileInputRef.current?.click()}
-      >
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept=".txt,.md,.zip"
-          className="hidden"
-          onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])}
-        />
-        <div className="text-4xl mb-4">🎯</div>
-        <p className="text-sm font-medium">Drop your chaos here</p>
-        <p className="text-xs text-[var(--muted-foreground)] mt-2">.txt, .md, or .zip</p>
-      </div>
-
-      {/* Paste Box — dump tasks without making a file first */}
-      <div className="mb-6">
-        <div className="flex items-center gap-3 mb-3">
-          <div className="h-px flex-1 bg-[var(--card-border)]" />
-          <span className="text-xs text-[var(--muted-foreground)] font-mono">or paste your tasks</span>
-          <div className="h-px flex-1 bg-[var(--card-border)]" />
-        </div>
+      {/* Paste Box (primary input) */}
+      <div className="mb-4">
         <textarea
           value={pasteText}
           onChange={(e) => setPasteText(e.target.value)}
@@ -560,8 +534,8 @@ export default function Home() {
               handlePasteSubmit();
             }
           }}
-          placeholder={"One task per line, then Sort…\n\nCall the dentist\nFinish the Q3 report\nBuy groceries"}
-          rows={5}
+          placeholder={"Paste your tasks here, one per line, then Sort…\n\nCall the dentist\nFinish the Q3 report\nBuy groceries"}
+          rows={6}
           disabled={isProcessing}
           className="input-field resize-y leading-relaxed disabled:opacity-50"
         />
@@ -580,6 +554,34 @@ export default function Home() {
             {isProcessing ? "Sorting…" : "🎯 Sort tasks"}
           </button>
         </div>
+      </div>
+
+      {/* Divider */}
+      <div className="flex items-center gap-3 my-5">
+        <div className="h-px flex-1 bg-[var(--card-border)]" />
+        <span className="text-xs text-[var(--muted-foreground)] font-mono">or drop a file</span>
+        <div className="h-px flex-1 bg-[var(--card-border)]" />
+      </div>
+
+      {/* Drop Zone (secondary) */}
+      <div
+        className={`drop-zone rounded-xl p-5 text-center cursor-pointer transition-all mb-6 ${isDragActive ? "active glow-primary" : ""}`}
+        onDragEnter={handleDrag}
+        onDragLeave={handleDrag}
+        onDragOver={handleDrag}
+        onDrop={handleFileDrop}
+        onClick={() => fileInputRef.current?.click()}
+      >
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".txt,.md,.zip"
+          className="hidden"
+          onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])}
+        />
+        <div className="text-2xl mb-2">📄</div>
+        <p className="text-sm font-medium">Drop a file</p>
+        <p className="text-xs text-[var(--muted-foreground)] mt-1">.txt, .md, or .zip</p>
       </div>
 
       {/* Error banner */}

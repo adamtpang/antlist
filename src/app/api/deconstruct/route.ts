@@ -87,7 +87,7 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Invalid Anthropic API key' }, { status: 401 });
         }
         if (status === 429) {
-            return NextResponse.json({ error: 'Rate limited — wait a moment and retry' }, { status: 429 });
+            return NextResponse.json({ error: 'Rate limited. Wait a moment and retry' }, { status: 429 });
         }
         if (/credit balance is too low/i.test(message)) {
             return NextResponse.json({ error: 'Anthropic credit balance too low. Add credits at console.anthropic.com → Plans & Billing.' }, { status: 402 });
