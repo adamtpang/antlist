@@ -370,6 +370,23 @@ export default function Home() {
   const handlePasteSubmit = async () => {
     if (!pasteText.trim() || isProcessing) return;
     const content = pasteText;
+
+    // If this is already an 8020.best markdown export, restore folders + tiers
+    // directly (no AI re-sort) -- same short-circuit handleFile already does
+    // for dropped .md files. Without this, pasting already-tiered content
+    // still hit the billed /api/sort endpoint for no reason.
+    const restored = parseAntlistMarkdown(content);
+    if (restored) {
+      setError(null);
+      setFolders(prev => {
+        const existingMap = new Map(prev.map(f => [f.name, f]));
+        restored.forEach(f => existingMap.set(f.name, f));
+        return Array.from(existingMap.values());
+      });
+      setPasteText("");
+      return;
+    }
+
     await processContent(content);
     setPasteText("");
   };
