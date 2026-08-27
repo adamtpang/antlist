@@ -29,14 +29,17 @@ export function FolderCard({
         isDragged ? "opacity-50 scale-95" : ""
       }`}
     >
-      <div
-        className="flex items-center gap-2 cursor-pointer"
+      <button
+        type="button"
+        className="flex w-full items-center gap-2 cursor-pointer text-left"
         onClick={() => onToggleExpand(folder.id)}
+        aria-expanded={folder.expanded}
+        aria-label={`${folder.expanded ? "Collapse" : "Expand"} ${folder.name} folder`}
       >
-        <span>{folder.expanded ? "📂" : "📁"}</span>
+        <span aria-hidden="true">{folder.expanded ? "📂" : "📁"}</span>
         <span className="font-medium text-sm truncate flex-1">{folder.name}</span>
         <span className="text-xs text-[var(--muted-foreground)]">{folder.tasks.length}</span>
-      </div>
+      </button>
 
       {folder.expanded && (
         <div className="mt-2 pt-2 border-t border-[var(--border)]">

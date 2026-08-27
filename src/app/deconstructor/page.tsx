@@ -302,6 +302,7 @@ export default function Deconstructor() {
                         type="checkbox"
                         checked={node.completed}
                         onChange={() => toggleTaskComplete(folderId, node.id)}
+                        aria-label={`${node.completed ? "Mark incomplete" : "Mark complete"}: ${node.text}`}
                         className={`mt-0.5 ${isMilestone ? "accent-blue-500" : "accent-green-500"} ${depth === 0 ? "w-4 h-4" : "w-3 h-3"}`}
                     />
                     <span className={`flex-1 ${depth === 0 ? "text-sm font-medium" : "text-xs"} ${node.completed ? "line-through" : ""} ${isMilestone ? "text-blue-300" : ""}`}>
@@ -311,9 +312,11 @@ export default function Deconstructor() {
                     {/* Show deconstruct button for items without children (leaves) */}
                     {isLeaf && !node.completed && (
                         <button
+                            type="button"
                             onClick={() => deconstructTask(folderId, node.id)}
                             disabled={isLoading}
                             className="opacity-0 group-hover:opacity-100 text-xs px-2 py-0.5 bg-[var(--primary)] text-black rounded hover:opacity-80 disabled:opacity-50 transition-opacity"
+                            aria-label={`Break down ${node.text}`}
                         >
                             {isLoading ? "..." : "⚛️ Break down"}
                         </button>
@@ -366,13 +369,16 @@ export default function Deconstructor() {
             {/* UPLOAD */}
             {viewMode === "upload" && (
                 <div>
-                    <div className="drop-zone rounded-xl p-8 text-center cursor-pointer" onClick={() => fileInputRef.current?.click()}>
-                        <input ref={fileInputRef} type="file" accept=".zip,.txt" className="hidden" onChange={handleUpload} />
-                        <div className="text-4xl mb-2">📦</div>
-                        <p className="text-sm">Upload ZIP of folders</p>
+                    <div className="drop-zone rounded-xl p-8 text-center">
+                        <input ref={fileInputRef} type="file" accept=".zip,.txt" className="hidden" onChange={handleUpload} aria-label="Upload a task ZIP or text file" />
+                        <div className="text-4xl mb-2" aria-hidden="true">📦</div>
+                        <p className="text-sm mb-3">Upload a ZIP of folders or a text file</p>
+                        <button type="button" className="btn-secondary text-sm px-4 py-2" onClick={() => fileInputRef.current?.click()}>
+                            Choose task file
+                        </button>
                     </div>
                     {folders.length > 0 && (
-                        <button onClick={() => setViewMode("tree")} className="mt-4 text-sm text-[var(--primary)] hover:underline">
+                        <button type="button" onClick={() => setViewMode("tree")} className="mt-4 text-sm text-[var(--primary)] hover:underline">
                             View tree ({folders.length} folders)
                         </button>
                     )}
@@ -397,9 +403,9 @@ export default function Deconstructor() {
                         </div>
                     </div>
                     <div className="flex justify-center gap-4">
-                        <button onClick={() => assignTier("C")} className="w-16 h-16 rounded-full bg-red-500 text-white text-2xl font-bold hover:scale-110 transition-transform">C</button>
-                        <button onClick={() => assignTier("B")} className="w-16 h-16 rounded-full bg-yellow-500 text-black text-2xl font-bold hover:scale-110 transition-transform">B</button>
-                        <button onClick={() => assignTier("A")} className="w-16 h-16 rounded-full bg-green-500 text-black text-2xl font-bold hover:scale-110 transition-transform">A</button>
+                        <button type="button" onClick={() => assignTier("C")} aria-label="Assign folder to C, Later" className="w-16 h-16 rounded-full bg-red-500 text-white text-2xl font-bold hover:scale-110 transition-transform">C</button>
+                        <button type="button" onClick={() => assignTier("B")} aria-label="Assign folder to B, Medium" className="w-16 h-16 rounded-full bg-yellow-500 text-black text-2xl font-bold hover:scale-110 transition-transform">B</button>
+                        <button type="button" onClick={() => assignTier("A")} aria-label="Assign folder to A, Priority" className="w-16 h-16 rounded-full bg-green-500 text-black text-2xl font-bold hover:scale-110 transition-transform">A</button>
                     </div>
                     <p className="text-xs text-[var(--muted-foreground)] mt-4">C = Later • B = Medium • A = Priority</p>
 
@@ -407,12 +413,14 @@ export default function Deconstructor() {
                     {sortHistory.length > 0 && (
                         <div className="flex flex-col items-center gap-2 mt-4">
                             <button
+                                type="button"
                                 onClick={undoLastSort}
                                 className="text-sm text-[var(--primary)] hover:underline flex items-center gap-1"
                             >
                                 ↩️ Undo last ({sortHistory[sortHistory.length - 1]})
                             </button>
                             <button
+                                type="button"
                                 onClick={resetAllRatings}
                                 className="text-xs text-red-400 hover:underline"
                             >
@@ -429,11 +437,11 @@ export default function Deconstructor() {
                     <div className="flex justify-between items-center mb-4">
                         <h2 className="font-semibold">📋 Task Tree</h2>
                         <div className="flex gap-2">
-                            <button onClick={downloadSortedZip} className="text-xs px-2 py-1 bg-[var(--primary)] text-black rounded">📥 ZIP</button>
-                            <button onClick={() => fileInputRef.current?.click()} className="text-xs text-[var(--primary)]">+Upload</button>
-                            <button onClick={reset} className="text-xs text-red-400">Reset</button>
+                            <button type="button" onClick={downloadSortedZip} aria-label="Download sorted ZIP" className="text-xs px-2 py-1 bg-[var(--primary)] text-black rounded">📥 ZIP</button>
+                            <button type="button" onClick={() => fileInputRef.current?.click()} className="text-xs text-[var(--primary)]">+Upload</button>
+                            <button type="button" onClick={reset} className="text-xs text-red-400">Reset</button>
                         </div>
-                        <input ref={fileInputRef} type="file" accept=".zip,.txt" className="hidden" onChange={handleUpload} />
+                        <input ref={fileInputRef} type="file" accept=".zip,.txt" className="hidden" onChange={handleUpload} aria-label="Upload another task ZIP or text file" />
                     </div>
 
                     {/* Group by tier */}
@@ -462,11 +470,23 @@ export default function Deconstructor() {
                                                 <div
                                                     className="p-3 flex items-center gap-2 cursor-pointer hover:bg-[var(--border)]/20"
                                                     onClick={() => toggleFolderExpand(globalIdx)}
+                                                    onKeyDown={(event) => {
+                                                        if (event.key === "Enter" || event.key === " ") {
+                                                            event.preventDefault();
+                                                            toggleFolderExpand(globalIdx);
+                                                        }
+                                                    }}
+                                                    role="button"
+                                                    tabIndex={0}
+                                                    aria-expanded={folder.expanded}
+                                                    aria-label={`${folder.expanded ? "Collapse" : "Expand"} ${folder.name} folder`}
                                                 >
                                                     <input
                                                         type="checkbox"
                                                         checked={folder.completed}
                                                         onChange={(e) => { e.stopPropagation(); toggleFolderComplete(globalIdx); }}
+                                                        onClick={(e) => e.stopPropagation()}
+                                                        aria-label={`${folder.completed ? "Mark folder incomplete" : "Mark folder complete"}: ${folder.name}`}
                                                         className="w-5 h-5 accent-green-500"
                                                     />
                                                     <span className="text-lg">{folder.expanded ? "📂" : "📁"}</span>
@@ -481,7 +501,9 @@ export default function Deconstructor() {
                                                         {(["A", "B", "C"] as const).map(t => (
                                                             <button
                                                                 key={t}
+                                                                type="button"
                                                                 onClick={() => changeFolderTier(globalIdx, t)}
+                                                                aria-label={`Move ${folder.name} to tier ${t}`}
                                                                 className={`w-5 h-5 text-[10px] font-bold rounded ${folder.tier === t
                                                                     ? t === "A" ? "bg-green-500 text-black" : t === "B" ? "bg-yellow-500 text-black" : "bg-red-500 text-white"
                                                                     : "bg-[var(--border)] text-[var(--muted-foreground)] hover:opacity-80"

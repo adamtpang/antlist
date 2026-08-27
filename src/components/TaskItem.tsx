@@ -16,6 +16,7 @@ export function TaskItem({ task, folderId, depth = 0, onToggle, onAddSubtask }: 
           type="checkbox"
           checked={task.completed}
           onChange={() => onToggle(folderId, task.id)}
+          aria-label={`${task.completed ? "Mark incomplete" : "Mark complete"}: ${task.text}`}
           className="accent-[var(--primary)]"
         />
         <span className={`flex-1 text-sm ${task.completed ? "line-through opacity-50" : ""}`}>
@@ -23,11 +24,13 @@ export function TaskItem({ task, folderId, depth = 0, onToggle, onAddSubtask }: 
         </span>
         {!task.completed && (
           <button
+            type="button"
             onClick={() => {
               const text = prompt("Add subtask:");
               if (text) onAddSubtask(folderId, task.id, text);
             }}
             className="opacity-0 group-hover:opacity-100 text-xs text-[var(--primary)]"
+            aria-label={`Add a subtask under ${task.text}`}
           >
             + sub
           </button>

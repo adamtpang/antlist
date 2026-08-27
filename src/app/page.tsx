@@ -535,14 +535,45 @@ export default function Home() {
   return (
     <main className="min-h-screen p-4 md:p-8 max-w-4xl mx-auto">
       {/* Header */}
-      <div className="text-center mb-12">
-        <h1 className="text-3xl font-bold tracking-tight mb-2">8020.best</h1>
-        <p className="text-[var(--muted-foreground)] text-sm font-mono">Do the vital 20% first</p>
-      </div>
+      <header className="text-center mb-10">
+        <div className="text-xs font-mono uppercase tracking-[0.18em] text-[var(--muted-foreground)] mb-3">
+          8020.best · Free web app · Price $0 · No account
+        </div>
+        <h1 className="text-3xl md:text-5xl font-bold tracking-tight mb-4">
+          Turn a task dump into the vital 20%
+        </h1>
+        <p className="max-w-2xl mx-auto text-[var(--muted-foreground)] leading-relaxed">
+          8020.best is a free, local-first task prioritizer for people staring at an unstructured list. Paste or upload tasks, sort them into 6 visible priority tiers, and move from an overwhelming backlog to a short list of work that deserves attention first.
+        </p>
+        <div className="flex flex-wrap items-center justify-center gap-3 mt-6">
+          <a href="#task-input" className="btn-primary text-sm px-4 py-2">
+            Start prioritizing tasks
+          </a>
+          <a href="/about" className="btn-secondary text-sm px-4 py-2">
+            See how 8020 works
+          </a>
+        </div>
+        <ul className="hero-facts" aria-label="8020 product facts">
+          <li>Paste text or upload Markdown, text, and ZIP files</li>
+          <li>Keep the working library in browser storage</li>
+          <li>Export a portable Markdown list or tiered ZIP</li>
+        </ul>
+      </header>
 
       {/* Paste Box (primary input) */}
-      <div className="mb-4">
+      <section className="mb-4" aria-labelledby="prioritize-title">
+        <h2 id="prioritize-title" className="text-xl font-semibold tracking-tight mb-2">
+          Prioritize your task list
+        </h2>
+        <p className="text-sm text-[var(--muted-foreground)] leading-relaxed mb-4">
+          The web app accepts one task per line and keeps the resulting folders in this browser. Sorting is requested only after you press the button, so drafting, editing, importing, viewing, copying, and exporting remain under your control.
+        </p>
+        <label htmlFor="task-input" className="control-label">
+          Tasks to prioritize
+        </label>
         <textarea
+          id="task-input"
+          name="tasks"
           value={pasteText}
           onChange={(e) => setPasteText(e.target.value)}
           onKeyDown={(e) => {
@@ -554,16 +585,18 @@ export default function Home() {
           placeholder={"Paste your tasks here, one per line, then Sort…\n\nCall the dentist\nFinish the Q3 report\nBuy groceries"}
           rows={6}
           disabled={isProcessing}
+          aria-describedby="task-input-hint"
           className="input-field resize-y leading-relaxed disabled:opacity-50"
         />
         <div className="flex items-center justify-between mt-2 gap-3">
-          <span className="text-xs text-[var(--muted-foreground)] font-mono">
+          <span id="task-input-hint" className="text-xs text-[var(--muted-foreground)] font-mono" aria-live="polite">
             {(() => {
               const n = pasteText.split(/\r?\n/).filter((l) => l.trim()).length;
               return n > 0 ? `${n} line${n === 1 ? "" : "s"} · ⌘/Ctrl+Enter to sort` : "AI sorts them into folders";
             })()}
           </span>
           <button
+            type="button"
             onClick={handlePasteSubmit}
             disabled={isProcessing || !pasteText.trim()}
             className="btn-primary text-sm px-4 py-2"
@@ -571,7 +604,7 @@ export default function Home() {
             {isProcessing ? "Sorting…" : "🎯 Sort tasks"}
           </button>
         </div>
-      </div>
+      </section>
 
       {/* Divider */}
       <div className="flex items-center gap-3 my-5">
@@ -587,26 +620,69 @@ export default function Home() {
         onDragLeave={handleDrag}
         onDragOver={handleDrag}
         onDrop={handleFileDrop}
-        onClick={() => fileInputRef.current?.click()}
       >
         <input
+          id="task-file"
           ref={fileInputRef}
           type="file"
           accept=".txt,.md,.zip"
           className="hidden"
+          aria-label="Upload a task file"
           onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])}
         />
-        <div className="text-2xl mb-2">📄</div>
-        <p className="text-sm font-medium">Drop a file</p>
-        <p className="text-xs text-[var(--muted-foreground)] mt-1">.txt, .md, or .zip</p>
+        <div className="text-2xl mb-2" aria-hidden="true">📄</div>
+        <div className="text-sm font-medium">Drop a task file here</div>
+        <div className="text-xs text-[var(--muted-foreground)] mt-1 mb-3">Accepted formats: .txt, .md, or .zip</div>
+        <button
+          type="button"
+          className="btn-secondary text-sm px-4 py-2"
+          onClick={() => fileInputRef.current?.click()}
+          aria-label="Choose a task file to upload"
+        >
+          Choose file
+        </button>
       </div>
+
+      <section className="explain-section" aria-labelledby="how-it-works-title">
+        <h2 id="how-it-works-title">How 8020.best works</h2>
+        <div className="explain-grid">
+          <div>
+            <h3>1. Add an honest task dump</h3>
+            <p>
+              Task input can come from pasted lines, a plain-text file, a Markdown checklist, or a ZIP of lists. Existing 8020 exports restore directly, while a new unstructured list can be sent for AI grouping when you explicitly choose Sort tasks.
+            </p>
+          </div>
+          <div>
+            <h3>2. Review 6 priority tiers</h3>
+            <p>
+              Priority output uses S, A, B, C, D, and F rows so urgency and importance stay visible instead of disappearing into a single queue. Folders can be dragged between tiers, opened for detail, and refined with completion state and subtasks.
+            </p>
+          </div>
+          <div>
+            <h3>3. Take the list with you</h3>
+            <p>
+              Portable exports turn the current library into readable Markdown or a tiered ZIP. The export preserves folder names, completion state, and nested subtasks, which makes the result useful outside 8020.best and safe to import again later.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section className="explain-section" aria-labelledby="data-title">
+        <h2 id="data-title">What happens to your tasks</h2>
+        <p>
+          Browser storage keeps the working task library in IndexedDB on the device where you use 8020.best. No account is required, and the current web app includes no advertising or analytics scripts. Clearing browser data can remove that local library, so export a backup before changing browsers or devices.
+        </p>
+        <p>
+          AI sorting happens only after a deliberate Sort tasks request. The task text and existing bucket names are sent through the 8020.best server to Anthropic Claude for that response. The full disclosure, including the separate Chrome extension and optional local companion, is available in the <a href="/privacy">privacy policy</a>.
+        </p>
+      </section>
 
       {/* Error banner */}
       {error && (
         <div className="mb-4 flex items-start gap-2 rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">
           <span aria-hidden>⚠️</span>
           <span className="flex-1">{error}</span>
-          <button onClick={() => setError(null)} className="text-red-400 hover:text-red-600" aria-label="Dismiss error">✕</button>
+          <button type="button" onClick={() => setError(null)} className="text-red-400 hover:text-red-600" aria-label="Dismiss error">✕</button>
         </div>
       )}
 
@@ -698,13 +774,13 @@ export default function Home() {
       {/* Actions */}
       {folders.length > 0 && (
         <div className="flex flex-wrap gap-2 mt-6 justify-center">
-          <button onClick={() => { setRawView(false); setShowMarkdown(true); }} className="btn-primary text-sm px-4 py-2">
+          <button type="button" onClick={() => { setRawView(false); setShowMarkdown(true); }} className="btn-primary text-sm px-4 py-2">
             📋 View / copy list
           </button>
-          <button onClick={downloadZip} className="btn-secondary text-sm px-4 py-2">
+          <button type="button" onClick={downloadZip} className="btn-secondary text-sm px-4 py-2">
             📦 Export ZIP
           </button>
-          <button onClick={clearAll} className="btn-secondary text-sm px-4 py-2 text-red-400">
+          <button type="button" onClick={clearAll} className="btn-secondary text-sm px-4 py-2 text-red-400">
             🗑️ Clear All
           </button>
         </div>
@@ -714,6 +790,9 @@ export default function Home() {
         <div
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 animate-fade-in"
           onClick={() => setShowMarkdown(false)}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="markdown-dialog-title"
         >
           <div
             className="bg-[var(--card)] border border-[var(--border)] rounded-xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col"
@@ -721,13 +800,14 @@ export default function Home() {
           >
             {/* Header */}
             <div className="flex items-center gap-2 p-4 border-b border-[var(--border)]">
-              <h2 className="font-semibold flex-1 flex items-center gap-2">
+              <h2 id="markdown-dialog-title" className="font-semibold flex-1 flex items-center gap-2">
                 <span>📋</span> Prioritized list
               </h2>
-              <button onClick={() => setRawView((v) => !v)} className="btn-secondary text-xs px-2.5 py-1">
+              <button type="button" onClick={() => setRawView((v) => !v)} className="btn-secondary text-xs px-2.5 py-1">
                 {rawView ? "Preview" : "Markdown"}
               </button>
               <button
+                type="button"
                 onClick={() => setShowMarkdown(false)}
                 className="text-[var(--muted-foreground)] hover:text-[var(--foreground)] text-xl leading-none px-1"
                 aria-label="Close"
@@ -774,10 +854,10 @@ export default function Home() {
 
             {/* Footer */}
             <div className="flex gap-2 p-4 border-t border-[var(--border)]">
-              <button onClick={copyMarkdown} className="btn-primary text-sm px-4 py-2 flex-1">
+              <button type="button" onClick={copyMarkdown} className="btn-primary text-sm px-4 py-2 flex-1">
                 {copied ? "✓ Copied to clipboard" : "📋 Copy markdown"}
               </button>
-              <button onClick={downloadMarkdown} className="btn-secondary text-sm px-4 py-2" title="Download .md file">
+              <button type="button" onClick={downloadMarkdown} className="btn-secondary text-sm px-4 py-2" title="Download .md file">
                 ⬇ .md
               </button>
             </div>
