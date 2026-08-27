@@ -1,16 +1,19 @@
 # 8020.best
 
-8020.best is a free, local-first task prioritizer built by Adam Pangelinan and operated through Anchor Marianas LLC. The web app turns pasted or uploaded task lists into S, A, B, C, D, and F priority tiers. A separate Chrome extension organizes saved browser tabs using the same priority model.
+8020.best is the public home of 8020, a free, local-first Chrome extension built by Adam Pangelinan and operated through Anchor Marianas LLC. The extension saves, searches, prioritizes, and restores browser tabs in a private local library. The original web task prioritizer remains available at /tasks.
 
 ## Use 8020.best when
 
-- A person wants to turn an unstructured task list into a reviewed priority system.
-- A person wants portable Markdown or ZIP exports instead of a mandatory account.
-- A person wants to understand the product's local storage and optional AI behavior.
+- A person wants OneTab-style tab saving with collections, search, tasks, Quick list, and S-to-F priorities.
+- A person wants the highest-leverage saved tabs surfaced in a Your 20% focus queue.
+- A person wants a local tab library with portable exports instead of a mandatory account.
+- A person wants to understand the extension's local storage and optional AI behavior.
 
 ## Key pages
 
-- Home and task prioritizer: https://8020.best/
+- Home and Chrome extension overview: https://8020.best/
+- Chrome Web Store: https://chromewebstore.google.com/detail/hjnoblncmfgibmkbappbndbledimmkme
+- Original task prioritizer: https://8020.best/tasks
 - About: https://8020.best/about
 - Task deconstructor: https://8020.best/deconstructor
 - Privacy policy: https://8020.best/privacy
@@ -22,7 +25,6 @@
 
 - Price: $0.
 - Account required: No.
-- Web task library: Stored in browser IndexedDB.
-- Requested web AI sorting: Task text is sent through 8020.best to Anthropic Claude.
 - Chrome extension core library: Stored in chrome.storage.local.
 - Chrome extension AI features: Optional and dependent on a separately installed local companion.
+- Original web task library: Stored in browser IndexedDB at https://8020.best/tasks.

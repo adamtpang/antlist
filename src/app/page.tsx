@@ -1,869 +1,206 @@
-"use client";
+import Image from "next/image";
+import Link from "next/link";
 
-import { useState, useCallback, useRef, useEffect } from "react";
-import JSZip from "jszip";
-import { get, set } from "idb-keyval";
-import { Folder, Task, Tier, SortResponse, TIERS, TIER_COLORS } from "@/lib/types";
-import { FolderCard } from "@/components/FolderCard";
+const CHROME_STORE_URL =
+  "https://chromewebstore.google.com/detail/hjnoblncmfgibmkbappbndbledimmkme";
 
-function generateId(): string {
-  return Math.random().toString(36).substring(2, 11);
-}
-
-// Serialize a task tree to an indented markdown checklist (preserves subtasks).
-function serializeTasks(tasks: Task[], depth = 0): string {
-  return tasks
-    .map((t) => {
-      const indent = "  ".repeat(depth);
-      const line = `${indent}- [${t.completed ? "x" : " "}] ${t.text}`;
-      const kids = t.children.length ? "\n" + serializeTasks(t.children, depth + 1) : "";
-      return line + kids;
-    })
-    .join("\n");
-}
-
-// Parse an 8020.best markdown export (## tier / ### folder / - [ ] task) back into folders,
-// preserving tiers. Returns null if the text isn't in that format, so raw todo lists fall
-// through to the AI sorter instead.
-function parseAntlistMarkdown(content: string): Folder[] | null {
-  const lines = content.split(/\r?\n/);
-  const hasTierHeader = lines.some((l) => /^##\s+[SABCDF?](?:\s|$)/.test(l));
-  const hasFolderHeader = lines.some((l) => /^###\s+\S/.test(l));
-  if (!hasTierHeader || !hasFolderHeader) return null;
-
-  const result: Folder[] = [];
-  let currentTier: Tier = null;
-  let currentFolder: Folder | null = null;
-  let stack: { task: Task; level: number }[] = [];
-
-  for (const raw of lines) {
-    const tierMatch = raw.match(/^##\s+([SABCDF?])(?:\s|$)/);
-    if (tierMatch) {
-      currentTier = tierMatch[1] === "?" ? null : (tierMatch[1] as Tier);
-      currentFolder = null;
-      stack = [];
-      continue;
-    }
-    const folderMatch = raw.match(/^###\s+(.+)/);
-    if (folderMatch) {
-      currentFolder = { id: generateId(), name: folderMatch[1].trim(), tier: currentTier, tasks: [], expanded: false };
-      result.push(currentFolder);
-      stack = [];
-      continue;
-    }
-    const taskMatch = raw.match(/^(\s*)-\s*\[([ xX])\]\s*(.+)/);
-    if (taskMatch && currentFolder) {
-      const level = Math.floor(taskMatch[1].length / 2);
-      const task: Task = { id: generateId(), text: taskMatch[3].trim(), completed: taskMatch[2].toLowerCase() === "x", children: [] };
-      if (level === 0) {
-        currentFolder.tasks.push(task);
-        stack = [{ task, level: 0 }];
-      } else {
-        while (stack.length && stack[stack.length - 1].level >= level) stack.pop();
-        const parent = stack[stack.length - 1];
-        if (parent) {
-          parent.task.children.push(task);
-          stack.push({ task, level });
-        } else {
-          currentFolder.tasks.push(task);
-          stack = [{ task, level: 0 }];
-        }
-      }
-    }
-  }
-
-  return result.length ? result : null;
-}
-
-// Trigger a browser download for a Blob.
-function triggerDownload(filename: string, blob: Blob): void {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-}
-
-// Read-only rendered task tree for the markdown preview modal.
-function renderPreviewTasks(tasks: Task[], depth = 0) {
-  return tasks.map((t) => (
-    <div key={t.id} style={{ paddingLeft: depth ? 16 : 0 }}>
-      <div className="flex items-start gap-2 py-0.5">
-        <span
-          className={`mt-1 w-3.5 h-3.5 shrink-0 rounded-[3px] border flex items-center justify-center text-[9px] leading-none ${
-            t.completed ? "bg-green-500 border-green-500 text-white" : "border-[var(--border)] text-transparent"
-          }`}
-        >
-          ✓
-        </span>
-        <span className={`text-sm ${t.completed ? "line-through text-[var(--muted-foreground)]" : ""}`}>{t.text}</span>
-      </div>
-      {t.children.length > 0 && renderPreviewTasks(t.children, depth + 1)}
-    </div>
-  ));
-}
+const priorities = [
+  ["S", "Act today", "Time-sensitive work where waiting creates a real cost."],
+  ["A", "Advance next", "Work that directly moves a current high-priority goal."],
+  ["B", "Support active work", "Useful tasks and references that are not the current lever."],
+  ["C", "Consider later", "Interesting or potentially useful, but optional right now."],
+  ["D", "Defer freely", "Low-leverage, duplicated, stale, or easy to find again."],
+  ["F", "Forget", "Distractions and irrelevant work that are safe to lose."],
+];
 
 export default function Home() {
-  const [folders, setFolders] = useState<Folder[]>([]);
-  const [isDragActive, setIsDragActive] = useState(false);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [isLoaded, setIsLoaded] = useState(false);
-  const [progress, setProgress] = useState({ current: 0, total: 0 });
-  const [draggedFolderId, setDraggedFolderId] = useState<string | null>(null);
-  const [pasteText, setPasteText] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [showMarkdown, setShowMarkdown] = useState(false);
-  const [rawView, setRawView] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  // Load from IndexedDB
-  useEffect(() => {
-    get("flowlist-folders").then((saved) => {
-      if (saved) setFolders(saved);
-      setIsLoaded(true);
-    });
-  }, []);
-
-  // Save to IndexedDB
-  useEffect(() => {
-    if (isLoaded) {
-      set("flowlist-folders", folders);
-    }
-  }, [folders, isLoaded]);
-
-  // Close the markdown modal on Escape
-  useEffect(() => {
-    if (!showMarkdown) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setShowMarkdown(false); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [showMarkdown]);
-
-  // File handling
-  const handleDrag = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (e.dataTransfer.types.includes("Files")) {
-      setIsDragActive(e.type === "dragenter" || e.type === "dragover");
-    }
-  }, []);
-
-  const handleFile = async (f: File) => {
-    if (f.name.endsWith(".zip")) {
-      const zip = new JSZip();
-      await zip.loadAsync(f);
-      const newFolders: Folder[] = [];
-
-      const processFile = async (relativePath: string, file: JSZip.JSZipObject) => {
-        if (file.dir) return; // Skip directories
-        if (relativePath.startsWith("__MACOSX/") || relativePath.includes(".DS_Store")) return; // Skip junk
-
-        const text = await file.async("string");
-        const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
-
-        // Parse tiers from path (e.g., "A/Work.txt" or "Work.txt")
-        const parts = relativePath.split("/");
-        const fileName = parts[parts.length - 1].replace(/\.(txt|md)$/, "");
-
-        // Check for tier in path or filename prefix
-        let tier: Tier = null;
-        let cleanName = fileName;
-
-        // Check path (e.g. "A/Folder.txt")
-        if (parts.length > 1) {
-          const parentDir = parts[parts.length - 2];
-          if (["S", "A", "B", "C", "D", "F"].includes(parentDir)) {
-            tier = parentDir as Tier;
-          }
-        }
-
-        // Also check filename prefix (e.g. "[A] Folder.txt") for back-compat
-        const tierMatch = fileName.match(/^\^([SABCDF])\]\s*(.+)/);
-        if (tierMatch) {
-          tier = tierMatch[1] as Tier;
-          cleanName = tierMatch[2];
-        }
-
-        // Parse checksum/count suffix if present (e.g. "Folder (5)")
-        cleanName = cleanName.replace(/\s*\(\d+\)$/, "");
-
-        const tasks: Task[] = [];
-        const taskStack: { task: Task; level: number }[] = [];
-
-        lines.forEach(line => {
-          const indentMatch = line.match(/^(\s*)/);
-          const indent = indentMatch ? indentMatch[1].length : 0;
-          const level = Math.floor(indent / 2); // Assume 2 spaces per level
-
-          const cleanLine = line.replace(/^\s*-\s*\[([ xX])\]\s*/, "") // Remove "- [ ]"
-            .replace(/^\s*-\s*/, ""); // OR remove just "- "
-          const completed = line.includes("[x]") || line.includes("[X]");
-
-          const newTask: Task = {
-            id: generateId(),
-            text: cleanLine,
-            completed,
-            children: []
-          };
-
-          if (level === 0) {
-            tasks.push(newTask);
-            taskStack.length = 0; // Reset stack
-            taskStack.push({ task: newTask, level: 0 });
-          } else {
-            // Find parent
-            while (taskStack.length > 0 && taskStack[taskStack.length - 1].level >= level) {
-              taskStack.pop();
-            }
-            const parent = taskStack[taskStack.length - 1];
-            if (parent) {
-              parent.task.children.push(newTask);
-              taskStack.push({ task: newTask, level });
-            } else {
-              // Fallback if indentation is weird
-              tasks.push(newTask);
-              taskStack.push({ task: newTask, level: 0 });
-            }
-          }
-        });
-
-        if (tasks.length > 0) {
-          newFolders.push({
-            id: generateId(),
-            name: cleanName,
-            tier,
-            tasks,
-            expanded: false
-          });
-        }
-      };
-
-      const promises: Promise<void>[] = [];
-      zip.forEach((relativePath, file) => {
-        promises.push(processFile(relativePath, file));
-      });
-
-      await Promise.all(promises);
-
-      // Update state, merging with existing
-      setFolders(prev => {
-        const existingMap = new Map(prev.map(f => [f.name, f]));
-        newFolders.forEach(f => {
-          existingMap.set(f.name, f);
-        });
-        return Array.from(existingMap.values());
-      });
-
-      return;
-    }
-
-    if (!f.name.endsWith(".txt") && !f.name.endsWith(".md")) return;
-    const content = await f.text();
-
-    // If this is an 8020.best markdown export, restore folders + tiers directly (no AI re-sort).
-    const restored = parseAntlistMarkdown(content);
-    if (restored) {
-      setError(null);
-      setFolders(prev => {
-        const existingMap = new Map(prev.map(f => [f.name, f]));
-        restored.forEach(f => existingMap.set(f.name, f));
-        return Array.from(existingMap.values());
-      });
-      return;
-    }
-
-    await processContent(content);
-  };
-
-  const handleFileDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDragActive(false);
-    if (e.dataTransfer.files?.[0]) handleFile(e.dataTransfer.files[0]);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-
-  const processContent = async (content: string) => {
-    setError(null);
-    const allLines = content.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
-    const newLines = allLines.filter(line => {
-      const inExisting = folders.some(f =>
-        f.tasks.some(t => t.text.toLowerCase() === line.toLowerCase())
-      );
-      return !inExisting;
-    });
-
-    if (newLines.length === 0) return;
-
-    const BATCH_SIZE = 30;
-    const batches: string[][] = [];
-    for (let i = 0; i < newLines.length; i += BATCH_SIZE) {
-      batches.push(newLines.slice(i, i + BATCH_SIZE));
-    }
-
-    setIsProcessing(true);
-    setProgress({ current: 0, total: batches.length });
-
-    const newFolders = new Map<string, Task[]>();
-    folders.forEach(f => newFolders.set(f.name, [...f.tasks]));
-
-    try {
-      for (let i = 0; i < batches.length; i++) {
-        const response = await fetch("/api/sort", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            batch: batches[i],
-            existingBuckets: Array.from(newFolders.keys())
-          }),
-        });
-
-        if (!response.ok) {
-          const errorData = await response.json().catch(() => ({}));
-          throw new Error(errorData.error || `Processing failed: ${response.status}`);
-        }
-        const data: SortResponse = await response.json();
-
-        for (const item of data.tasks) {
-          const task: Task = { id: generateId(), text: item.text, completed: false, children: [] };
-          if (!newFolders.has(item.bucket)) {
-            newFolders.set(item.bucket, []);
-          }
-          newFolders.get(item.bucket)!.push(task);
-        }
-
-        setProgress({ current: i + 1, total: batches.length });
-        if (i < batches.length - 1) await delay(300);
-      }
-
-      // Merge with existing folders, new ones get tier: null
-      const updatedFolders: Folder[] = [];
-      const existingFolderMap = new Map(folders.map(f => [f.name, f]));
-
-      newFolders.forEach((tasks, name) => {
-        const existing = existingFolderMap.get(name);
-        updatedFolders.push({
-          id: existing?.id || generateId(),
-          name,
-          tier: existing?.tier || null,
-          tasks,
-          expanded: existing?.expanded || false,
-        });
-      });
-
-      setFolders(updatedFolders);
-    } catch (err) {
-      console.error(err);
-      setError(err instanceof Error ? err.message : "Sorting failed");
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  // Paste raw text directly (no file needed)
-  const handlePasteSubmit = async () => {
-    if (!pasteText.trim() || isProcessing) return;
-    const content = pasteText;
-
-    // If this is already an 8020.best markdown export, restore folders + tiers
-    // directly (no AI re-sort) -- same short-circuit handleFile already does
-    // for dropped .md files. Without this, pasting already-tiered content
-    // still hit the billed /api/sort endpoint for no reason.
-    const restored = parseAntlistMarkdown(content);
-    if (restored) {
-      setError(null);
-      setFolders(prev => {
-        const existingMap = new Map(prev.map(f => [f.name, f]));
-        restored.forEach(f => existingMap.set(f.name, f));
-        return Array.from(existingMap.values());
-      });
-      setPasteText("");
-      return;
-    }
-
-    await processContent(content);
-    setPasteText("");
-  };
-
-  // Drag-drop for tier sorting
-  const handleFolderDragStart = (e: React.DragEvent, folderId: string) => {
-    setDraggedFolderId(folderId);
-    e.dataTransfer.effectAllowed = "move";
-  };
-
-  const handleFolderDragEnd = () => {
-    setDraggedFolderId(null);
-  };
-
-  const handleTierDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "move";
-  };
-
-  const handleTierDrop = (e: React.DragEvent, tier: Tier) => {
-    e.preventDefault();
-    if (!draggedFolderId) return;
-
-    setFolders(prev => prev.map(f =>
-      f.id === draggedFolderId ? { ...f, tier } : f
-    ));
-    setDraggedFolderId(null);
-  };
-
-  // Toggle folder expansion
-  const toggleExpand = (folderId: string) => {
-    setFolders(prev => prev.map(f =>
-      f.id === folderId ? { ...f, expanded: !f.expanded } : f
-    ));
-  };
-
-  // Toggle task completion
-  const toggleTask = (folderId: string, taskId: string) => {
-    setFolders(prev => prev.map(f => {
-      if (f.id !== folderId) return f;
-
-      const toggleInTree = (tasks: Task[]): Task[] =>
-        tasks.map(t => t.id === taskId
-          ? { ...t, completed: !t.completed }
-          : { ...t, children: toggleInTree(t.children) }
-        );
-
-      return { ...f, tasks: toggleInTree(f.tasks) };
-    }));
-  };
-
-  // Add subtask
-  const addSubtask = (folderId: string, parentTaskId: string, text: string) => {
-    if (!text.trim()) return;
-
-    setFolders(prev => prev.map(f => {
-      if (f.id !== folderId) return f;
-
-      const addToTree = (tasks: Task[]): Task[] =>
-        tasks.map(t => t.id === parentTaskId
-          ? { ...t, children: [...t.children, { id: generateId(), text, completed: false, children: [] }] }
-          : { ...t, children: addToTree(t.children) }
-        );
-
-      return { ...f, tasks: addToTree(f.tasks) };
-    }));
-  };
-
-  // Clear all
-  const clearAll = () => {
-    setFolders([]);
-    localStorage.removeItem("flowlist-folders");
-  };
-
-  // Download ZIP: everything nested under an "8020/" root, tiers as subfolders (re-importable).
-  const downloadZip = async () => {
-    const zip = new JSZip();
-    const date = new Date().toISOString().split("T")[0];
-    const root = zip.folder("8020");
-
-    TIERS.forEach(tier => {
-      if (!tier) return;
-      const tierFolders = folders.filter(f => f.tier === tier);
-      if (tierFolders.length === 0) return;
-      const tierFolder = root?.folder(tier);
-      tierFolders.forEach(folder => {
-        tierFolder?.file(`${folder.name}.txt`, serializeTasks(folder.tasks));
-      });
-    });
-
-    const unsorted = folders.filter(f => f.tier === null);
-    if (unsorted.length > 0) {
-      const unsortedFolder = root?.folder("_Unsorted");
-      unsorted.forEach(folder => {
-        unsortedFolder?.file(`${folder.name}.txt`, serializeTasks(folder.tasks));
-      });
-    }
-
-    const blob = await zip.generateAsync({ type: "blob" });
-    triggerDownload(`8020-${date}.zip`, new Blob([blob], { type: "application/zip" }));
-  };
-
-  // Build the prioritized markdown (S → F, then unsorted). Single source for view / copy / download.
-  const buildMarkdown = () => {
-    const date = new Date().toISOString().split("T")[0];
-    const sections: string[] = [`# 8020.best · ${date}`, "", "_Priority order: top = do these first._", ""];
-
-    TIERS.forEach(tier => {
-      if (!tier) return;
-      const tierFolders = folders.filter(f => f.tier === tier);
-      if (tierFolders.length === 0) return;
-      sections.push(`## ${tier}`, "");
-      tierFolders.forEach(folder => {
-        sections.push(`### ${folder.name}`, serializeTasks(folder.tasks), "");
-      });
-    });
-
-    const unsorted = folders.filter(f => f.tier === null);
-    if (unsorted.length > 0) {
-      sections.push(`## ? (Unsorted)`, "");
-      unsorted.forEach(folder => {
-        sections.push(`### ${folder.name}`, serializeTasks(folder.tasks), "");
-      });
-    }
-
-    return sections.join("\n").replace(/\n{3,}/g, "\n\n").trim() + "\n";
-  };
-
-  const downloadMarkdown = () => {
-    const date = new Date().toISOString().split("T")[0];
-    triggerDownload(`8020-${date}.md`, new Blob([buildMarkdown()], { type: "text/markdown;charset=utf-8" }));
-  };
-
-  const copyMarkdown = async () => {
-    try {
-      await navigator.clipboard.writeText(buildMarkdown());
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      setCopied(false);
-    }
-  };
-
-  const unsortedFolders = folders.filter(f => f.tier === null);
-
   return (
-    <main className="min-h-screen p-4 md:p-8 max-w-4xl mx-auto">
-      {/* Header */}
-      <header className="text-center mb-10">
-        <div className="text-xs font-mono uppercase tracking-[0.18em] text-[var(--muted-foreground)] mb-3">
-          8020.best · Free web app · Price $0 · No account
-        </div>
-        <h1 className="text-3xl md:text-5xl font-bold tracking-tight mb-4">
-          Turn a task dump into the vital 20%
-        </h1>
-        <p className="max-w-2xl mx-auto text-[var(--muted-foreground)] leading-relaxed">
-          8020.best is a free, local-first task prioritizer for people staring at an unstructured list. Paste or upload tasks, sort them into 6 visible priority tiers, and move from an overwhelming backlog to a short list of work that deserves attention first.
-        </p>
-        <div className="flex flex-wrap items-center justify-center gap-3 mt-6">
-          <a href="#task-input" className="btn-primary text-sm px-4 py-2">
-            Start prioritizing tasks
-          </a>
-          <a href="/about" className="btn-secondary text-sm px-4 py-2">
-            See how 8020 works
-          </a>
-        </div>
-        <ul className="hero-facts" aria-label="8020 product facts">
-          <li>Paste text or upload Markdown, text, and ZIP files</li>
-          <li>Keep the working library in browser storage</li>
-          <li>Export a portable Markdown list or tiered ZIP</li>
-        </ul>
+    <main className="extension-landing">
+      <header className="marketing-nav">
+        <Link className="brand-lockup" href="/" aria-label="8020 home">
+          <Image src="/extension-icon.png" alt="" width={32} height={32} priority />
+          <span>8020</span>
+        </Link>
+        <nav aria-label="Primary navigation">
+          <a href="#features">Features</a>
+          <a href="#priority">Priority system</a>
+          <Link href="/privacy">Privacy</Link>
+        </nav>
+        <a className="nav-install" href={CHROME_STORE_URL}>
+          Get 8020
+        </a>
       </header>
 
-      {/* Paste Box (primary input) */}
-      <section className="mb-4" aria-labelledby="prioritize-title">
-        <h2 id="prioritize-title" className="text-xl font-semibold tracking-tight mb-2">
-          Prioritize your task list
-        </h2>
-        <p className="text-sm text-[var(--muted-foreground)] leading-relaxed mb-4">
-          The web app accepts one task per line and keeps the resulting folders in this browser. Sorting is requested only after you press the button, so drafting, editing, importing, viewing, copying, and exporting remain under your control.
-        </p>
-        <label htmlFor="task-input" className="control-label">
-          Tasks to prioritize
-        </label>
-        <textarea
-          id="task-input"
-          name="tasks"
-          value={pasteText}
-          onChange={(e) => setPasteText(e.target.value)}
-          onKeyDown={(e) => {
-            if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-              e.preventDefault();
-              handlePasteSubmit();
-            }
-          }}
-          placeholder={"Paste your tasks here, one per line, then Sort…\n\nCall the dentist\nFinish the Q3 report\nBuy groceries"}
-          rows={6}
-          disabled={isProcessing}
-          aria-describedby="task-input-hint"
-          className="input-field resize-y leading-relaxed disabled:opacity-50"
-        />
-        <div className="flex items-center justify-between mt-2 gap-3">
-          <span id="task-input-hint" className="text-xs text-[var(--muted-foreground)] font-mono" aria-live="polite">
-            {(() => {
-              const n = pasteText.split(/\r?\n/).filter((l) => l.trim()).length;
-              return n > 0 ? `${n} line${n === 1 ? "" : "s"} · ⌘/Ctrl+Enter to sort` : "AI sorts them into folders";
-            })()}
-          </span>
-          <button
-            type="button"
-            onClick={handlePasteSubmit}
-            disabled={isProcessing || !pasteText.trim()}
-            className="btn-primary text-sm px-4 py-2"
-          >
-            {isProcessing ? "Sorting…" : "🎯 Sort tasks"}
-          </button>
+      <section className="extension-hero" aria-labelledby="extension-title">
+        <div className="hero-copy">
+          <span className="eyebrow">Local-first Chrome extension</span>
+          <h1 id="extension-title">Your important tabs, first.</h1>
+          <p>
+            8020 turns a crowded browser into a clear, recoverable priority system. Save tabs into collections, find anything quickly, restore exactly what you need, and keep the three highest-leverage items visible in a focused Your 20% queue.
+          </p>
+          <div className="hero-actions">
+            <a className="install-button" href={CHROME_STORE_URL}>
+              Get 8020 for Chrome <span aria-hidden="true">↗</span>
+            </a>
+            <a className="text-button" href="#how-it-works">
+              See how it works
+            </a>
+          </div>
+          <ul className="extension-facts" aria-label="Product facts">
+            <li>Free · $0</li>
+            <li>No account</li>
+            <li>Saved locally</li>
+            <li>Optional AI</li>
+          </ul>
+        </div>
+
+        <div className="hero-product" aria-label="8020 extension preview">
+          <div className="window-bar" aria-hidden="true">
+            <span />
+            <span />
+            <span />
+            <b>8020 · Priority Tabs</b>
+          </div>
+          <Image
+            src="/extension-library.png"
+            alt="8020 extension showing the Your 20% focus queue, collections, and S-to-F priority tiers"
+            width={1280}
+            height={800}
+            sizes="(max-width: 900px) 94vw, 58vw"
+            priority
+          />
         </div>
       </section>
 
-      {/* Divider */}
-      <div className="flex items-center gap-3 my-5">
-        <div className="h-px flex-1 bg-[var(--card-border)]" />
-        <span className="text-xs text-[var(--muted-foreground)] font-mono">or drop a file</span>
-        <div className="h-px flex-1 bg-[var(--card-border)]" />
-      </div>
-
-      {/* Drop Zone (secondary) */}
-      <div
-        className={`drop-zone rounded-xl p-5 text-center cursor-pointer transition-all mb-6 ${isDragActive ? "active glow-primary" : ""}`}
-        onDragEnter={handleDrag}
-        onDragLeave={handleDrag}
-        onDragOver={handleDrag}
-        onDrop={handleFileDrop}
-      >
-        <input
-          id="task-file"
-          ref={fileInputRef}
-          type="file"
-          accept=".txt,.md,.zip"
-          className="hidden"
-          aria-label="Upload a task file"
-          onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])}
-        />
-        <div className="text-2xl mb-2" aria-hidden="true">📄</div>
-        <div className="text-sm font-medium">Drop a task file here</div>
-        <div className="text-xs text-[var(--muted-foreground)] mt-1 mb-3">Accepted formats: .txt, .md, or .zip</div>
-        <button
-          type="button"
-          className="btn-secondary text-sm px-4 py-2"
-          onClick={() => fileInputRef.current?.click()}
-          aria-label="Choose a task file to upload"
-        >
-          Choose file
-        </button>
-      </div>
-
-      <section className="explain-section" aria-labelledby="how-it-works-title">
-        <h2 id="how-it-works-title">How 8020.best works</h2>
-        <div className="explain-grid">
-          <div>
-            <h3>1. Add an honest task dump</h3>
-            <p>
-              Task input can come from pasted lines, a plain-text file, a Markdown checklist, or a ZIP of lists. Existing 8020 exports restore directly, while a new unstructured list can be sent for AI grouping when you explicitly choose Sort tasks.
-            </p>
-          </div>
-          <div>
-            <h3>2. Review 6 priority tiers</h3>
-            <p>
-              Priority output uses S, A, B, C, D, and F rows so urgency and importance stay visible instead of disappearing into a single queue. Folders can be dragged between tiers, opened for detail, and refined with completion state and subtasks.
-            </p>
-          </div>
-          <div>
-            <h3>3. Take the list with you</h3>
-            <p>
-              Portable exports turn the current library into readable Markdown or a tiered ZIP. The export preserves folder names, completion state, and nested subtasks, which makes the result useful outside 8020.best and safe to import again later.
-            </p>
-          </div>
-        </div>
+      <section className="proof-strip" aria-label="Core product promise">
+        <span>OneTab-style saving</span>
+        <span aria-hidden="true">+</span>
+        <span>real collections</span>
+        <span aria-hidden="true">+</span>
+        <span>priority that stays visible</span>
       </section>
 
-      <section className="explain-section" aria-labelledby="data-title">
-        <h2 id="data-title">What happens to your tasks</h2>
-        <p>
-          Browser storage keeps the working task library in IndexedDB on the device where you use 8020.best. No account is required, and the current web app includes no advertising or analytics scripts. Clearing browser data can remove that local library, so export a backup before changing browsers or devices.
-        </p>
-        <p>
-          AI sorting happens only after a deliberate Sort tasks request. The task text and existing bucket names are sent through the 8020.best server to Anthropic Claude for that response. The full disclosure, including the separate Chrome extension and optional local companion, is available in the <a href="/privacy">privacy policy</a>.
-        </p>
-      </section>
-
-      {/* Error banner */}
-      {error && (
-        <div className="mb-4 flex items-start gap-2 rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">
-          <span aria-hidden>⚠️</span>
-          <span className="flex-1">{error}</span>
-          <button type="button" onClick={() => setError(null)} className="text-red-400 hover:text-red-600" aria-label="Dismiss error">✕</button>
-        </div>
-      )}
-
-      {/* Progress */}
-      {isProcessing && (
-        <div className="mb-4">
-          <div className="progress-bar">
-            <div
-              className="progress-bar-fill"
-              style={{ width: `${(progress.current / progress.total) * 100}%` }}
-            />
-          </div>
-          <p className="text-xs text-center mt-1 text-[var(--muted-foreground)]">
-            Processing {progress.current}/{progress.total}
+      <section id="features" className="marketing-section">
+        <div className="section-heading">
+          <span className="eyebrow">Built for the tabs you mean to return to</span>
+          <h2>A library, not a tab graveyard.</h2>
+          <p>
+            8020 keeps the speed people expect from a tab saver while adding the structure needed to make saved tabs useful later. Every core action works without an account, advertising, analytics, or mandatory AI.
           </p>
         </div>
-      )}
+        <div className="feature-grid">
+          <div>
+            <span className="feature-number">01</span>
+            <h3>Save without losing work</h3>
+            <p>
+              Save the current window, every window, selected tabs, or the tabs beside the current one. 8020 persists each record before closing its source tab, preserves Chrome group names and colors, and removes a saved record only after restoration succeeds.
+            </p>
+          </div>
+          <div>
+            <span className="feature-number">02</span>
+            <h3>Find the vital few</h3>
+            <p>
+              Rank collections and tabs from S through F, star a Quick list, and mark lightweight tasks as todo or done. The Your 20% queue combines those signals to surface the three saved tabs most likely to matter now.
+            </p>
+          </div>
+          <div>
+            <span className="feature-number">03</span>
+            <h3>Keep control of the library</h3>
+            <p>
+              Search titles, URLs, collections, and Chrome groups from the library or the address bar with keyword 80. Merge, archive, share, import, and export collections, while Trash and Undo keep common cleanup mistakes recoverable.
+            </p>
+          </div>
+        </div>
+      </section>
 
-      {/* Tier Rows */}
-      {folders.length > 0 && (
-        <div className="space-y-2">
-          {TIERS.map(tier => {
-            const tierFolders = folders.filter(f => f.tier === tier);
-            return (
-              <div
-                key={tier}
-                className="flex gap-2 items-stretch"
-                onDragOver={handleTierDragOver}
-                onDrop={(e) => handleTierDrop(e, tier)}
-              >
-                <div className={`${tier ? TIER_COLORS[tier] : ""} w-12 flex items-center justify-center rounded-lg text-white font-bold text-xl`}>
-                  {tier}
-                </div>
-                <div className="flex-1 min-h-[60px] bg-[var(--card)] border border-[var(--border)] rounded-lg p-2 flex flex-wrap gap-2 items-start">
-                  {tierFolders.map(folder => (
-                    <FolderCard
-                      key={folder.id}
-                      folder={folder}
-                      isDragged={draggedFolderId === folder.id}
-                      onDragStart={handleFolderDragStart}
-                      onDragEnd={handleFolderDragEnd}
-                      onToggleExpand={toggleExpand}
-                      onToggleTask={toggleTask}
-                      onAddSubtask={addSubtask}
-                    />
-                  ))}
-                  {tierFolders.length === 0 && (
-                    <span className="text-xs text-[var(--muted-foreground)] opacity-50 self-center">
-                      Drag folders here
-                    </span>
-                  )}
-                </div>
+      <section id="how-it-works" className="workflow-section">
+        <div className="section-heading compact">
+          <span className="eyebrow">A calmer browser in three moves</span>
+          <h2>Save. Prioritize. Return.</h2>
+        </div>
+        <ol className="workflow-list">
+          <li>
+            <span>1</span>
+            <div>
+              <h3>Capture the open loop</h3>
+              <p>
+                Choose Save window from the 8020 library, use a keyboard shortcut, or save a precise group from Chrome’s context menu. New tabs land in a recoverable Unsorted inbox instead of disappearing into an anonymous list.
+              </p>
+            </div>
+          </li>
+          <li>
+            <span>2</span>
+            <div>
+              <h3>Give it an honest priority</h3>
+              <p>
+                Move each collection into the tier that reflects its real leverage. S is reserved for work with a same-day cost, A advances a current goal, and the lower tiers make postponement or deletion explicit instead of accidental.
+              </p>
+            </div>
+          </li>
+          <li>
+            <span>3</span>
+            <div>
+              <h3>Restore only what matters</h3>
+              <p>
+                Open a single tab, selected tabs, or a complete collection when the work becomes relevant. 8020 preserves failed restores, keeps removed items in Trash, and provides portable exports so the library does not become a lock-in trap.
+              </p>
+            </div>
+          </li>
+        </ol>
+      </section>
+
+      <section id="priority" className="priority-section">
+        <div className="priority-copy">
+          <span className="eyebrow">A threshold, not a quota</span>
+          <h2>Every tab earns its tier.</h2>
+          <p>
+            8020 publishes the complete S-to-F admission rubric inside the extension. Empty tiers are valid, and nothing is promoted merely to make the board look busy. The result is a priority system a person can inspect, correct, and trust.
+          </p>
+          <Image
+            src="/priority-rubric.png"
+            alt="8020 priority rubric explaining the S, A, B, C, D, and F tiers"
+            width={1280}
+            height={800}
+            sizes="(max-width: 900px) 94vw, 46vw"
+          />
+        </div>
+        <ol className="tier-list">
+          {priorities.map(([tier, name, description]) => (
+            <li key={tier}>
+              <span className={`tier-mark tier-${tier.toLowerCase()}`}>{tier}</span>
+              <div>
+                <h3>{name}</h3>
+                <span>{description}</span>
               </div>
-            );
-          })}
+            </li>
+          ))}
+        </ol>
+      </section>
 
-          {/* Unsorted */}
-          <div
-            className="flex gap-2 items-stretch mt-4"
-            onDragOver={handleTierDragOver}
-            onDrop={(e) => handleTierDrop(e, null)}
-          >
-            <div className="bg-[var(--muted)] w-12 flex items-center justify-center rounded-lg text-[var(--muted-foreground)] font-bold text-xs">
-              ?
-            </div>
-            <div className="flex-1 min-h-[60px] bg-[var(--card)] border border-dashed border-[var(--border)] rounded-lg p-2 flex flex-wrap gap-2 items-start">
-              {unsortedFolders.map(folder => (
-                <FolderCard
-                  key={folder.id}
-                  folder={folder}
-                  isDragged={draggedFolderId === folder.id}
-                  onDragStart={handleFolderDragStart}
-                  onDragEnd={handleFolderDragEnd}
-                  onToggleExpand={toggleExpand}
-                  onToggleTask={toggleTask}
-                  onAddSubtask={addSubtask}
-                />
-              ))}
-              {unsortedFolders.length === 0 && (
-                <span className="text-xs text-[var(--muted-foreground)] opacity-50 self-center">
-                  Unsorted folders appear here
-                </span>
-              )}
-            </div>
-          </div>
+      <section className="privacy-band">
+        <div>
+          <span className="eyebrow">Local by default</span>
+          <h2>Your saved tabs stay on your device.</h2>
         </div>
-      )}
+        <p>
+          8020 stores the working library in Chrome local storage and includes no advertising, analytics, or remote telemetry. Optional AI triage requires a separately installed local companion, an explicit permission grant, and a user-started action. Core saving, search, organization, export, and restoration never depend on AI.
+        </p>
+        <Link href="/privacy">Read the privacy policy</Link>
+      </section>
 
-      {/* Actions */}
-      {folders.length > 0 && (
-        <div className="flex flex-wrap gap-2 mt-6 justify-center">
-          <button type="button" onClick={() => { setRawView(false); setShowMarkdown(true); }} className="btn-primary text-sm px-4 py-2">
-            📋 View / copy list
-          </button>
-          <button type="button" onClick={downloadZip} className="btn-secondary text-sm px-4 py-2">
-            📦 Export ZIP
-          </button>
-          <button type="button" onClick={clearAll} className="btn-secondary text-sm px-4 py-2 text-red-400">
-            🗑️ Clear All
-          </button>
-        </div>
-      )}
-      {/* Markdown view / copy modal */}
-      {showMarkdown && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 animate-fade-in"
-          onClick={() => setShowMarkdown(false)}
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="markdown-dialog-title"
-        >
-          <div
-            className="bg-[var(--card)] border border-[var(--border)] rounded-xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Header */}
-            <div className="flex items-center gap-2 p-4 border-b border-[var(--border)]">
-              <h2 id="markdown-dialog-title" className="font-semibold flex-1 flex items-center gap-2">
-                <span>📋</span> Prioritized list
-              </h2>
-              <button type="button" onClick={() => setRawView((v) => !v)} className="btn-secondary text-xs px-2.5 py-1">
-                {rawView ? "Preview" : "Markdown"}
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowMarkdown(false)}
-                className="text-[var(--muted-foreground)] hover:text-[var(--foreground)] text-xl leading-none px-1"
-                aria-label="Close"
-              >
-                ✕
-              </button>
-            </div>
-
-            {/* Body */}
-            <div className="overflow-y-auto p-5 flex-1">
-              {rawView ? (
-                <pre className="text-xs font-mono whitespace-pre-wrap bg-[var(--muted)] rounded-lg p-4 leading-relaxed border border-[var(--border)]">
-                  {buildMarkdown()}
-                </pre>
-              ) : (
-                <div>
-                  {[...TIERS, null].map((tier) => {
-                    const tierFolders = folders.filter((f) => f.tier === tier);
-                    if (tierFolders.length === 0) return null;
-                    return (
-                      <div key={tier ?? "unsorted"} className="mb-6 last:mb-0">
-                        <div className="flex items-center gap-2 mb-3">
-                          <span
-                            className={`${tier ? TIER_COLORS[tier] : "bg-[var(--muted)] text-[var(--muted-foreground)]"} w-6 h-6 flex items-center justify-center rounded-md text-white font-bold text-xs shrink-0`}
-                          >
-                            {tier ?? "?"}
-                          </span>
-                          <div className="h-px flex-1 bg-[var(--border)]" />
-                        </div>
-                        <div className="space-y-4 pl-1">
-                          {tierFolders.map((folder) => (
-                            <div key={folder.id}>
-                              <div className="text-sm font-semibold mb-1.5">{folder.name}</div>
-                              <div className="pl-0.5">{renderPreviewTasks(folder.tasks)}</div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
-            {/* Footer */}
-            <div className="flex gap-2 p-4 border-t border-[var(--border)]">
-              <button type="button" onClick={copyMarkdown} className="btn-primary text-sm px-4 py-2 flex-1">
-                {copied ? "✓ Copied to clipboard" : "📋 Copy markdown"}
-              </button>
-              <button type="button" onClick={downloadMarkdown} className="btn-secondary text-sm px-4 py-2" title="Download .md file">
-                ⬇ .md
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <section className="final-cta">
+        <Image src="/extension-icon.png" alt="" width={52} height={52} />
+        <h2>Close the tabs. Keep the priorities.</h2>
+        <p>
+          Turn today’s browser sprawl into a local, searchable library that keeps the vital few visible and everything else safely recoverable.
+        </p>
+        <a className="install-button light" href={CHROME_STORE_URL}>
+          Get 8020 for Chrome <span aria-hidden="true">↗</span>
+        </a>
+        <Link className="legacy-link" href="/tasks">
+          Looking for the original task prioritizer?
+        </Link>
+      </section>
     </main>
   );
 }

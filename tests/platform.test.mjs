@@ -15,20 +15,32 @@ test("security headers stay enforced without wildcard origins", async () => {
   assert.doesNotMatch(config, /https?:\/\/\*/);
 });
 
-test("root metadata exposes canonical identity and truthful schema", async () => {
+test("root metadata exposes canonical extension identity and truthful schema", async () => {
   const layout = await read("src/app/layout.tsx");
 
   assert.match(layout, /canonical:\s*"\/"/);
   assert.match(layout, /"@type": "Organization"/);
-  assert.match(layout, /"@type": "WebApplication"/);
+  assert.match(layout, /"@type": "SoftwareApplication"/);
+  assert.match(layout, /name: "8020 - Priority Tab Manager"/);
+  assert.match(layout, /chromewebstore\.google\.com\/detail\/hjnoblncmfgibmkbappbndbledimmkme/);
   assert.match(layout, /price:\s*"0"/);
   assert.match(layout, /href="\/privacy"/);
   assert.match(layout, /href="\/about"/);
   assert.match(layout, /href="\/contact"/);
 });
 
-test("initial task controls have stable accessible names", async () => {
+test("extension landing page exposes a clear install path and product evidence", async () => {
   const page = await read("src/app/page.tsx");
+
+  assert.match(page, /Your important tabs, first/);
+  assert.match(page, /Get 8020 for Chrome/);
+  assert.match(page, /extension-library\.png/);
+  assert.match(page, /Your 20% focus queue/);
+  assert.match(page, /href="\/tasks"/);
+});
+
+test("preserved task prioritizer controls have stable accessible names", async () => {
+  const page = await read("src/app/tasks/page.tsx");
 
   assert.match(page, /<label htmlFor="task-input"/);
   assert.match(page, /id="task-input"/);
